@@ -1,0 +1,272 @@
+---
+title: "Concuro analisis produccion turbinas eolicas"
+author: "Alberto"
+date: "2017"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir=dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+## 1. Proceso
+El proceso tiene 2 partes primero calcularemos cada turbina de forma independiente y despues usaremos los datos de las turbinas para poder procesarlo todo.
+
+
+## 2. Set-up working environment
+
+First, we install and load the different libraries used to solve this problem. You need to un-comment the install.packages commands in case you do not have that package installed. 
+```{r}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+rm(list = ls())
+
+library(ggplot2) # beautiful graphs
+library(corrplot) # correlation plot
+library(MASS) # logistic regression models
+library(class)
+library(bestglm) # subset model selection
+library(kernlab)
+library(glmnet) # LASSO regression models
+library(ROCR) # ROC curve
+library("sqldf")
+library(dplyr)
+library(lubridate)
+library(randomForest)
+
+```
+
+
+## 3. Load and arrange the dataset
+
+Cargamos los datos del concurso.
+```{r}
+datos.entrada.Train <- read.csv("datosConcurso.train.csv")
+datos.entrada.Test  <- read.csv("datosConcurso.test.csv")
+
+acumular <- function(entrada) {
+  entrada$Fecha       <- as.Date(entrada$Fecha)
+  entrada$Mes         <- month(entrada$Fecha)
+  entrada$DiaSem      <- wday(entrada$Fecha)
+  
+  entrada$MEDIDAAcumu <- 0
+  
+  fechaTemp = "1900-01-01"
+  MEDIDAAcumu = 0
+  #acumulamos la MEDIDA con lo anterior
+  for (ind in 1:nrow(entrada)){
+    entrada$MEDIDAAcumu[ind] <- MEDIDAAcumu
+    if (fechaTemp == entrada$Fecha[ind]) {
+      MEDIDAAcumu = MEDIDAAcumu + entrada$MEDIDA[ind]
+    } else {
+      fechaTemp <- entrada$Fecha[ind]
+      MEDIDAAcumu   = entrada$MEDIDA[ind]
+    }
+    if (24 == entrada$Hora[ind]) {
+      MEDIDAAcumu = 0
+    }
+  }
+  return (entrada)
+}
+
+datos.entrada.Train <- acumular(datos.entrada.Train)
+datos.entrada.Train[,c("Hora","MEDIDA","MEDIDAAcumu")]
+```
+
+### 3.1 sacamos las correlaciones entre variables
+```{r}
+
+correlaciones <- function(datos.entrada.Train.Filtrado) {
+  #analizamos NULLS
+  total   = sum(is.na(datos.entrada.Train.Filtrado))
+  print(paste0("Total de valores perdidos ",total))
+  
+  datos.entrada.Train.Filtrado$PresionLOCALIDAD1 <- NULL
+  datos.entrada.Train.Filtrado$PresionLOCALIDAD2 <- NULL
+  datos.entrada.Train.Filtrado$PrecipitacionesLOCALIDAD4 <- NULL
+  datos.entrada.Train.Filtrado$VelVientoLOCALIDAD4 <- NULL
+  datos.entrada.Train.Filtrado$DirVientoLOCALIDAD4 <- NULL
+  datos.entrada.Train.Filtrado$HumedadLOCALIDAD4 <- NULL
+  
+  
+  columna = apply(datos.entrada.Train.Filtrado,2,function(x) sum(is.na(x)))
+  columna[columna > 0]
+  #nrow(datos.entrada.Train.Filtrado)
+  fila.Train = apply(datos.entrada.Train.Filtrado,1,function(x) sum(is.na(x)))
+  datos.entrada.Train.Filtrado <- datos.entrada.Train.Filtrado[fila.Train==0,]
+  
+  
+  corrplot(cor(datos.entrada.Train.Filtrado[,c(024,002:023,241,242)]))
+  for (i in seq(25,235,24)){
+    corrplot(cor(datos.entrada.Train.Filtrado[,c(024,seq(i,i+23))]))
+   } 
+}
+correlaciones(datos.entrada.Train)
+```
+
+## 4 proceso por turbina
+
+### 4.1 Proceso de busqueda de variables.
+```{r}
+#Buscamos las variables a analizar
+variablesNecesarias <- function (train) {
+  nColumnas <- colnames(train)
+  nColumnasTX <- nColumnas[grepl(paste0("LOCALIDAD|Hora|Mes|DiaSem|MEDIDAAcumu"), nColumnas)]
+  #quitamos la localidad4
+  nColumnasTX <- nColumnasTX[!grepl("VelVientoLOCALIDAD4|DirVientoLOCALIDAD4", nColumnasTX)]
+  #quitamos Precipitaciones y presion
+  nColumnasTX <- nColumnasTX[!grepl("PresionLOCALIDAD|PrecipitacionesLOCALIDAD",nColumnasTX)]
+  return (nColumnasTX)
+}
+temp.variablesNecesarias <- variablesNecesarias(datos.entrada.Train)
+temp.variablesNecesarias
+```
+### 4.2 Proceso del modelo por Fecha
+```{r}
+#Funcion para analizar los datos de cada turbina
+modeloPorFecha <- function (train, variables,fecha) {
+  #cogemos las variables y windSpeed
+  V_target = "MEDIDA"
+  V_explicativas = variables
+  print(fecha)
+
+  if (length(train[,V_target])==0) {
+    return (NULL)
+  }
+  #solo me quedo con los datos anteriores a la fecha dada.
+  # print(nrow(train))
+  train.filtrado <- train[train$Fecha < fecha,]
+  # print(nrow(train))
+  
+  #cogemos los datos de las variables determinadas
+  datos.entrada.TX = subset(train.filtrado, select=c(V_target, V_explicativas))
+  
+  
+  #si los datos de WindSpeedT1 no valen... entonces los quitamos
+  datos.entrada.TX <- datos.entrada.TX[!is.na(datos.entrada.TX$MEDIDA),]
+
+  #control de NULES  
+  total   = sum(is.na(datos.entrada.TX))
+  #print(paste0("Total de valores perdidos ",total))
+  #fila    = apply(reservas,1,function(x) sum(is.na(x)))
+  columna = apply(datos.entrada.TX,2,function(x) sum(is.na(x)))
+  #mostramos todas las columnas con NA
+  #columna[columna > 0]
+
+  #quit los nules
+  print(paste("antes: ",nrow(datos.entrada.TX)))
+  fila = apply(datos.entrada.TX,1,function(x) sum(is.na(x)))
+  datos.entrada.TX <- datos.entrada.TX[fila==0,]
+  print(paste("despues: ",nrow(datos.entrada.TX)))
+  datos.train.TX = datos.entrada.TX
+  
+  #preparamos el modelo
+  my_formula = as.formula( paste(names(datos.train.TX)[1], "~", paste(names(datos.train.TX)[-1], collapse=" + ")) )
+  
+  set.seed(13)
+  best_rf=118
+  modelo.randomForest <- randomForest(my_formula, data = datos.train.TX, importance=TRUE,
+                                      ntree=best_rf)
+  # mostrar grafico de las variables mas importantes
+  return ( modelo.randomForest)
+}
+temp.modeloPorFecha <- modeloPorFecha(datos.entrada.Train,temp.variablesNecesarias,"2016-07-16")
+```
+### 4.3 Proceso de Test
+```{r}
+
+testTodo <- function(train,test) {
+  #calculamos las variables necesarias
+  variables <- variablesNecesarias(train)
+  #hago un bucle para procesar cada fila de test y reprocesarlo.
+  #creo las variables necesarias el el fichero de test.
+  test$Fecha  <- as.Date(test$Fecha)
+  test$Mes    <- month(test$Fecha)
+  test$DiaSem <- wday(test$Fecha)
+  test$MEDIDAAcumu <- 0
+  
+  #me quedo solo con las variable buenas:
+  test.Ok <- subset(test, select=c(variables,"Fecha"))
+
+  #control de nulos de Test
+  total   = sum(is.na(test.Ok))
+  print(paste0("Total de valores perdidos ",total))
+  columna = apply(test.Ok,2,function(x) sum(is.na(x)))
+  #mostramos todas las columnas con NA
+  print(columna[columna > 0])
+  
+  #normalizamos dos variables que nos dan problemas
+  test.Ok$HumedadLOCALIDAD2[is.na(test.Ok$HumedadLOCALIDAD2)] <- mean(test.Ok$HumedadLOCALIDAD2,na.rm=TRUE)
+  test.Ok$TemperaturaLOCALIDAD2[is.na(test.Ok$TemperaturaLOCALIDAD2)] <- mean(test.Ok$TemperaturaLOCALIDAD2,na.rm=TRUE)
+  test.Ok$HumedadLOCALIDAD4[is.na(test.Ok$HumedadLOCALIDAD4)] <- mean(test.Ok$HumedadLOCALIDAD4,na.rm=TRUE)
+  test.Ok$TemperaturaLOCALIDAD4[is.na(test.Ok$TemperaturaLOCALIDAD4)] <- mean(test.Ok$TemperaturaLOCALIDAD4,na.rm=TRUE)
+  #volvemos a revisar nules
+  total   = sum(is.na(test.Ok))
+  print(paste0("Total de valores perdidos ",total))
+
+  #ya tenemos el fichero Test preparado, vamos a organizar una llamada por cada fila de test
+  resultado <- NULL
+  modelo <- NULL
+  fechaAnt <- "1900-01-01"
+  acumu <- 0
+  for (i in 1:nrow(test.Ok)) {
+    fila = test.Ok[i,]
+    fechaAct = fila$Fecha
+    #parte del modelo
+    if (is.null(modelo)||fechaAnt!=fechaAct) {
+      # print(paste("cambiamos de Modelo",fechaAct))
+      modelo <- modeloPorFecha(train, variables, fechaAct)
+    }
+    #primera parte del acumu acumulamos lo que tenemos
+    if (fechaAnt==fechaAct){
+      fila$MEDIDAAcumu <- acumu
+    } else {
+      acumu <- 0
+    }
+    #quitamos la fecha y procesamos la fila.
+    fila$Fecha <- NULL
+    
+    #aplicamos el modelo
+    fila.resultado <- predict(modelo,fila)
+    # print(paste("resultado",fila.resultado))
+    
+    #añadimos el resultado y la fecha
+    fila$Fecha <- fechaAct
+    fila$MEDIDA <- fila.resultado
+    # print(fila)
+    
+    if (is.null(resultado)){
+      resultado <- fila
+    } else {
+      resultado <- rbind(resultado,fila)
+    }
+
+    #proceso despues de aplicar el modelo
+    acumu <- acumu + fila.resultado
+    fechaAnt <- fechaAct
+  }
+  return (resultado)
+}
+
+temp.testTodo <- testTodo (datos.entrada.Train,datos.entrada.Test)
+temp.testTodo
+hist(temp.testTodo$MEDIDA)
+summary(temp.testTodo$MEDIDA)
+sd(temp.testTodo$MEDIDA)
+hist(datos.entrada.Train$MEDIDA)
+summary(datos.entrada.Train$MEDIDA)
+sd(datos.entrada.Train$MEDIDA)
+
+#guardamos en CSV el fichero de salida:
+write.csv(temp.testTodo,"salida.csv")
+save(temp.testTodo,file="salida.Rda")
+
+par(mfrow=c(1,2)) 
+boxplot(temp.testTodo$MEDIDA)
+boxplot(datos.entrada.Train$MEDIDA)
+```
+```{r}
+```
+

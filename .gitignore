@@ -1,0 +1,10 @@
+/pythonBatch/pyproj/log/*
+/pythonBatch/pyproj/logOld/*
+/pythonBatch/test/log/*	
+/pythonBatch/test/logOld/*
+/pythonBatch/test/__pycache__/*
+
+*.pyc
+
+pythonBatch/test/results.xml
+pythonBatch/test/.cache

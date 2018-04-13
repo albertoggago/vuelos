@@ -1,0 +1,653 @@
+---
+title: "Vuelos modelo para averiguar cuando un precio baja de precio"
+author: "Alberto Jose Garcia Gago"
+date: "2017"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+#install.packages("knitr")
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir=dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+## 1. Proceso
+Pendiente de localizar
+
+## 2. Set-up working environment
+```{r}
+packages <- c("s20x","lubridate","dplyr","ggplot2","e1071","caret",
+              "randomForest","gbm","neuralnet")
+new <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new)) install.packages(new)
+a=lapply(packages, require, character.only=TRUE)
+```
+
+```{r}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+rm(list = ls())
+
+library(ggplot2) # beautiful graphs
+library(corrplot) # correlation plot
+library(MASS) # logistic regression models
+library(class)
+library(bestglm) # subset model selection
+library(kernlab)
+library(glmnet) # LASSO regression models
+library(ROCR) # ROC curve
+library(randomForest)
+library("sqldf")
+library(lubridate)
+library(dplyr)
+library(e1071)
+library(gbm)
+library(neuralnet)
+```
+
+
+## 3. Load and arrange the dataset
+
+Cargamos los datos del concurso.
+```{r}
+datos.entrada.Train <- read.csv("datosConcurso.train.csv")
+#datos.entrada.Test  <- read.csv("datosConcurso.test.csv")
+
+
+acumular <- function(entrada) {
+  entrada$Fecha <- as.Date(entrada$Fecha)
+  entrada$MEDIDAAcumu <- 0
+  entrada$Mes <- month(entrada$Fecha)
+  entrada$DiaSem <- wday(entrada$Fecha)
+
+  
+
+  fechaTemp = "1900-01-01"
+  MEDIDAAcumu = 0
+  #acumulamos la MEDIDA con lo anterior
+  for (ind in 1:nrow(entrada)){
+    entrada$MEDIDAAcumu[ind] <- MEDIDAAcumu
+    if (fechaTemp == entrada$Fecha[ind]) {
+      MEDIDAAcumu = MEDIDAAcumu + entrada$MEDIDA[ind]
+    } else {
+      fechaTemp <- entrada$Fecha[ind]
+      MEDIDAAcumu   = entrada$MEDIDA[ind]
+    }
+    if (24 == entrada$Hora[ind]) {
+      MEDIDAAcumu = 0
+    }
+  }
+  return (entrada)
+}
+
+datos.entrada.Train <- acumular(datos.entrada.Train)
+# datos.entrada.Train
+datos.entrada.Train[,c("Hora","MEDIDA","MEDIDAAcumu")]
+```
+
+### 3.1 sacamos las correlaciones entre variables
+```{r}
+datos.entrada.Train.Filtrado <- datos.entrada.Train
+
+#analizamos NULLS
+total   = sum(is.na(datos.entrada.Train.Filtrado))
+print(paste0("Total de valores perdidos ",total))
+
+columna = apply(datos.entrada.Train.Filtrado,2,function(x) sum(is.na(x)))
+columna[columna > 0]
+
+datos.entrada.Train.Filtrado$PresionLOCALIDAD1 <- NULL
+datos.entrada.Train.Filtrado$PresionLOCALIDAD2 <- NULL
+#datos.entrada.Train.Filtrado$PrecipitacionesLOCALIDAD4 <- NULL
+datos.entrada.Train.Filtrado$VelVientoLOCALIDAD4 <- NULL
+datos.entrada.Train.Filtrado$DirVientoLOCALIDAD4 <- NULL
+#datos.entrada.Train.Filtrado$HumedadLOCALIDAD4 <- NULL
+
+#nrow(datos.entrada.Train.Filtrado)
+fila.Train = apply(datos.entrada.Train.Filtrado,1,function(x) sum(is.na(x)))
+datos.entrada.Train.Filtrado <- datos.entrada.Train.Filtrado[fila.Train==0,]
+
+
+corrplot(cor(datos.entrada.Train.Filtrado[,c(026,002:015)]))
+corrplot(cor(datos.entrada.Train.Filtrado[,c(026,016:025,243,244,245)]))
+for (i in seq(27,237,24)){
+  print(i)
+  corrplot(cor(datos.entrada.Train.Filtrado[,c(026,seq(i,i+23))]))
+} 
+
+
+```
+
+## 4 proceso por turbina
+
+### 4.1 Proceso de busqueda de variables.
+```{r}
+#Buscamos las variables a analizar
+variablesNecesarias <- function (train) {
+  nColumnas <- colnames(train)
+  nColumnasTX <- nColumnas[grepl(paste0("LOCALIDAD|Hora|Mes|DiaSem|MEDIDAAcumu"), nColumnas)]
+  #quitamos la localidad4
+  nColumnasTX <- nColumnasTX[!grepl("VelVientoLOCALIDAD4|DirVientoLOCALIDAD4", nColumnasTX)]
+  #quitamos Precipitaciones y presion
+  nColumnasTX <- nColumnasTX[!grepl("PresionLOCALIDAD|PrecipitacionesLOCALIDAD",nColumnasTX)]
+  return (nColumnasTX)
+}
+variablesNecesarias(datos.entrada.Train)
+```
+### 4.2 Modelos
+
+#### 4.2.1 Preparacion de los datos.
+```{r}
+  variables <- variablesNecesarias(datos.entrada.Train)
+  train <- datos.entrada.Train
+  
+#Funcion para analizar los datos de cada turbina
+  #cogemos las variables y windSpeed
+  V_target = "MEDIDA"
+  V_explicativas = variables
+
+ 
+  
+  datos.entrada.TX = subset(train, select=c(V_target, V_explicativas))
+  #cambiamos la primera variable
+  datos.entrada.TX
+```
+
+```{r}
+  #si los datos de WindSpeedT1 no valen... entonces los quitamos
+  #no hace falta.
+  datos.entrada.TX <- datos.entrada.TX[!is.na(datos.entrada.TX$MEDIDA),]
+
+  #control de NULES  
+  total   = sum(is.na(datos.entrada.TX))
+  #print(paste0("Total de valores perdidos ",total))
+  #fila    = apply(reservas,1,function(x) sum(is.na(x)))
+  columna = apply(datos.entrada.TX,2,function(x) sum(is.na(x)))
+  #mostramos todas las columnas con NA
+  #columna[columna > 0]
+
+  #quit los nules
+  #print(paste("antes: ",nrow(datos.entrada.TX)))
+  fila = apply(datos.entrada.TX,1,function(x) sum(is.na(x)))
+  datos.entrada.TX <- datos.entrada.TX[fila==0,]
+  #print(paste("despues: ",nrow(datos.entrada.TX)))
+  datos.entrada.TX
+  #cuales tiene la MEDIDA a cero
+  datos.entrada.TX[datos.entrada.TX$MEDIDA==0,]
+  datos.entrada.TX[!datos.entrada.TX$MEDIDA==0,]
+  # datos.entrada.TX[!datos.entrada.TX$MEDIDA==0,] %>%
+  # group_by(Hora) %>%
+  # summarize(MEDIDAPlus = sum(MEDIDA)) %>%
+  # ggplot(aes(Hora, weight=MEDIDAPlus)) + geom_bar()
+  # datos.entrada.TX[!datos.entrada.TX$MEDIDA==0,] %>%
+  # group_by(Hora) %>%
+  # summarize(WindPlus = sum(VelVientoLOCALIDAD1+VelVientoLOCALIDAD2+VelVientoLOCALIDAD3+VelVientoLOCALIDAD5)) %>%
+  # ggplot(aes(Hora, weight=WindPlus)) + geom_bar()
+```
+
+#### 4.2.2 Separacion de los ficheros Test y train
+```{r}
+  normalize <- function(x) {
+    return ((x - min(x)) / (max(x) - min(x)))  
+  }
+datos.entrada.TXN = as.data.frame(apply(datos.entrada.TX,2,normalize))
+datos.entrada.MEDIDA.min <- min(datos.entrada.TX$MEDIDA)
+datos.entrada.MEDIDA.max <- max(datos.entrada.TX$MEDIDA)
+
+desnormalizar <- function(x) {
+  return ((datos.entrada.MEDIDA.max - datos.entrada.MEDIDA.min) * x +  datos.entrada.MEDIDA.min)  
+}
+
+
+set.seed(13)
+index = 1:nrow(datos.entrada.TXN)
+porc_test = 0.3
+  
+  testindex = base::sample(index, trunc(length(index)*porc_test))
+  testset = datos.entrada.TXN[testindex,]
+  trainset = datos.entrada.TXN[-testindex,]
+  names(trainset)
+  
+
+```
+
+#### 4.2.3 lanzar modelizacion
+
+```{r}
+Xtestset = testset
+Xtrainset = trainset
+#calculamos la media de MEDIDA
+summary(datos.entrada.TX$MEDIDA)
+summary(datos.entrada.TX$MEDIDA[datos.entrada.TX$MEDIDA!=0])
+```
+
+## 5. Data Modelling
+
+Define the same formula (target and predictors) for all the models
+```{r}
+my_formula = as.formula( paste(names(datos.entrada.TX)[1], "~", paste(names(datos.entrada.TX)[-1], collapse=" + ")) )
+my_formula
+```
+
+### 5.1. K Nearest Neigbours
+```{r}
+# estimate best k
+n = length(Xtrainset[,1])
+k_max = 100
+tabla_k_error = matrix(NA, ncol=2, nrow=k_max)
+for (i in 1 : k_max){
+  knn.fit = knn.cv(train = Xtrainset[,-1], 
+                   cl = Xtrainset[,1], 
+                   k=i, prob = TRUE)
+  table(Xtrainset[,1], knn.fit)
+  tabla_k_error[i,1] <- i
+  tabla_k_error[i,2] <- (n - sum(knn.fit==Xtrainset[,1])) / n
+}
+tabla_k_error
+
+plot(tabla_k_error[,1], tabla_k_error[,2], main="Classification Error", pch=19,col="steelblue4",
+     xlab="Nunmber of neigbours (k)",ylab="error")
+best_k = tabla_k_error[ tabla_k_error[,2]==min(tabla_k_error[,2]), 1]
+best_k = best_k[1]
+best_k
+
+# final model
+predict.knn = knn(train = Xtrainset[,-1], 
+       cl = Xtrainset[,1], 
+       test = Xtestset[,-1],
+       k=best_k, prob = TRUE)
+
+predict.knn
+
+```
+
+
+```{r}
+
+# knn returns the max probability. Rebuild the data
+max_prob_knn = as.numeric(paste(predict.knn))
+ms2_knn_train = 0
+ms2_knn_test = ms2.test.ln1 <- sum((desnormalizar(max_prob_knn) - desnormalizar(Xtestset[,1]))^2)/length(Xtestset[,1])
+ms2_knn_test
+```
+
+Let's see the precission of our predictions
+```{r}
+plot(Xtestset[,1], max_prob_knn, lty=1, col="red", main="knn")
+```
+
+### 5.2. Logistic Regression
+
+Let use the broadly use logistic model with stepwise selection
+```{r}
+# Logistic Regression with stepwise selection ----------------------------------------------------------
+my_formula_1 = as.formula( paste(names(datos.entrada.TX)[1], "~ 1" ))
+model.1 = glm(my_formula_1, data = trainset, family = binomial(link="logit") )
+
+my_formula_all = as.formula( paste(names(datos.entrada.TX)[1], "~ ." ))
+model.all = glm(my_formula_all, data = trainset, family = binomial(link="logit") )
+summary(model.all, correlation=T)
+
+select.step <- step(model.1, scope = list(lower=model.1, upper=model.all), direction="both")
+# selected model
+select.step$formula
+# prediction on test dataset
+predict.logit_step <- predict(select.step, 
+                              newdata = testset, 
+                              type = "response")
+
+plot(Xtestset[,1],predict.logit_step, lty=1, col="red", main="ln sel test")
+```
+```{r}
+select.step <- step(model.1, scope = list(lower=model.1, upper=model.all), direction="forward")
+
+select.step <- step(model.1, scope = list(lower=model.1, upper=model.all), direction="backward")
+```
+
+
+Prediccion de LN TRAIN
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.logit_step.train <- predict(model.all, 
+                              newdata = trainset, 
+                              type = "response")
+plot(Xtrainset[,1],predict.logit_step.train, lty=1, col="red", main="ln all train")
+
+ms2_logit_step_train =  ms2.test.ln1 <- sum((desnormalizar(predict.logit_step.train) - desnormalizar(Xtrainset[,1]))^2)/length(Xtrainset[,1])
+ms2_logit_step_train
+```
+
+Prediccion de LN TEST
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.logit_step.test <- predict(model.all, 
+                              newdata = testset, 
+                              type = "response")
+plot(Xtestset[,1],predict.logit_step.test, lty=1, col="red", main="ln all test")
+
+ms2_logit_step_test = ms2.test.ln1 <- sum((desnormalizar(predict.logit_step.test) - desnormalizar(Xtestset[,1]))^2)/length(Xtestset[,1])
+ms2_logit_step_test
+```
+
+
+
+### 4.3. Logistic Regression with subset selection
+
+Subsect selections aloows to check all models and select the best one
+```{r}
+# Logistic Regression with subset selection -----------------------------------------------
+?bestglm
+
+# must put on "bestglm form" (first predictors, then taget)
+y = as.numeric(trainset[,1])
+Xy = as.data.frame(cbind(trainset[,-1], y))
+y.test = as.numeric(testset[,1])
+Xy.test = as.data.frame(cbind(testset[,-1], y.test))
+#best_models = bestglm(Xy, IC="BIC", family = binomial, TopModels = 2)
+best_models = bestglm(Xy, IC="BIC", family = gaussian, TopModels = 2)
+# The best subsets of size, k=0,1,...,p are indicated as well the value 
+#       of the log-likelihood and information criterion for each best subset
+best_models$Subsets
+```
+
+```{r}
+# selected model
+best_models$BestModel
+
+# prediction on test dataset
+predict.logit_subset <- predict(best_models$BestModel, 
+                              newdata = testset, 
+                              type = "response")
+```
+
+
+Prediccion de BEST LN TRAIN
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.logit_subset.train <- predict(best_models$BestModel, 
+                              newdata = Xy, 
+                              type = "response")
+plot(Xtrainset[,1],predict.logit_subset.train, lty=1, col="red", main="ln best train")
+
+ms2_logit_subset_train =  ms2.test.ln1 <- sum((desnormalizar(predict.logit_subset.train) - desnormalizar(Xtrainset[,1]))^2)/length(Xtrainset[,1])
+ms2_logit_subset_train
+```
+
+Prediccion de BEST LN TEST
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.logit_subset.test <- predict(best_models$BestModel, 
+                              newdata = Xy.test, 
+                              type = "response")
+plot(Xtestset[,1],predict.logit_subset.test, lty=1, col="red", main="ln best test")
+
+ms2_logit_subset_test = ms2.test.ln1 <- sum((desnormalizar(predict.logit_step.test) - desnormalizar(Xtestset[,1]))^2)/length(Xtestset[,1])
+ms2_logit_subset_test
+```
+
+
+### 4.4. LASSO Regression
+Logistic Regression with Ridge regularization
+```{r}
+# alpha = 0 , for Ridge
+LASSOFit <- glmnet(y =  as.numeric(Xtrainset$MEDIDA), 
+                   x = data.matrix(Xtrainset[,-1]),
+                   alpha=0,
+                   family='poisson', 
+                   nlambda = 20)
+plot(LASSOFit, xvar="lambda")
+```
+Logistic Regression with LASSO regularization
+```{r}
+# alpha = 1 , for LASSO
+LASSOFit <- glmnet(y =  as.numeric(Xtrainset$MEDIDA), 
+                   x = data.matrix(Xtrainset[,-1]),
+                   alpha=1,
+                   family='poisson', 
+                   nlambda = 20)
+plot(LASSOFit, xvar="lambda")
+
+LASSOFit$lambda
+```
+
+Logistic regression with LASSO variable selection and cross-validation
+```{r}
+cvLASSOFit <- cv.glmnet(y =  as.numeric(Xtrainset$MEDIDA), 
+                   x = data.matrix(Xtrainset[,-1]),
+                   alpha=1,
+                   family='poisson',
+                   nfolds = 10)
+
+predict.LASSO <- predict(cvLASSOFit, 
+                         newx = data.matrix(Xtestset[,-1]), 
+                         type = "response", 
+                         s = cvLASSOFit$lambda.1se)
+# lambda with smalles CV
+log( cvLASSOFit$lambda.min )
+# max lambda that is at 1 s.e. distance from the best lambda 
+log( cvLASSOFit$lambda.1se )
+```
+Let see the regularization effect
+```{r}
+plot(cvLASSOFit)
+```
+
+Prediccion de BEST LASSO TRAIN
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.LASSO.train <- predict(cvLASSOFit, 
+                              newx = data.matrix(Xtrainset[,-1]),  
+                              type = "response",
+                              s = cvLASSOFit$lambda.1se)
+plot(Xtrainset[,1],predict.LASSO.train, lty=1, col="red", main="LASSO train")
+
+ms2_LASSO_train <- sum((desnormalizar(predict.LASSO.train) - desnormalizar(Xtrainset[,1]))^2)/length(Xtrainset[,1])
+ms2_LASSO_train
+```
+
+Prediccion de BEST LASSO TEST
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.LASSO.test <- predict(cvLASSOFit, 
+                              newx = data.matrix(Xtestset[,-1]),  
+                              type = "response",
+                              s = cvLASSOFit$lambda.1se)
+plot(Xtestset[,1],predict.LASSO.test, lty=1, col="red", main="LASSO test")
+
+ms2_LASSO_test =  sum((desnormalizar(predict.LASSO.test) - desnormalizar(Xtestset[,1]))^2)/length(Xtestset[,1])
+ms2_LASSO_test
+```
+
+Let's see the precission of our predictions
+
+### 4.5. Random Forest
+
+Random Forest is one of the most powerful yet simple-to-use techniques. It combanies many (hundreds) classification trees to produce accurate and not over-fitted predictions
+```{r}
+#Find the best model of Random Forest
+rf_max = 500
+tabla_rf_error = matrix(NA, ncol=2, nrow=rf_max)
+for (i in 1 : rf_max){
+  set.seed(13)
+  randomForest.fit <- randomForest(my_formula, data = trainset,
+                                      importance=TRUE,
+                                      ntree=i)
+  randomForest.predict <- predict(randomForest.fit, 
+                                testset[,-1])
+  ms2_RANDOMF_fit <- 
+    sum((desnormalizar(randomForest.predict) - desnormalizar(Xtestset[,1]))^2)/length(Xtestset[,1])
+  tabla_rf_error[i,1] <- i
+  tabla_rf_error[i,2] <- ms2_RANDOMF_fit
+}
+#tabla_rf_error
+plot(tabla_rf_error[,1], tabla_rf_error[,2], main="Classification Error", pch=19,col="steelblue4",
+     xlab="FOREST (k)",ylab="error")
+best_rf = tabla_rf_error[ tabla_rf_error[,2]==min(tabla_rf_error[,2]), 1]
+best_rf = best_rf[1]
+best_rf
+```
+
+Model Decidido.
+```{r}
+set.seed(13)
+best_rf = 118
+modelo.randomForest <- randomForest(my_formula, data = trainset, importance=TRUE,
+                                    ntree=best_rf)
+# mostrar grafico de las variables mas importantes
+
+varImpPlot(modelo.randomForest)
+predict.randomForest <- predict(modelo.randomForest, 
+                                testset[,-1]) # devuelve las probabilidades de pertenencia
+```
+
+Prediccion de BEST RANDOMF TRAIN
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.RANDOMF.train <- predict(modelo.randomForest, 
+                              Xtrainset[,-1])
+plot(Xtrainset[,1],predict.RANDOMF.train, lty=1, col="red", main="RandomForest train")
+
+ms2_RANDOMF_train =  ms2.test.ln1 <- sum((desnormalizar(predict.RANDOMF.train) - desnormalizar(Xtrainset[,1]))^2)/length(Xtrainset[,1])
+ms2_RANDOMF_train
+```
+
+Prediccion de BEST RAMDOMF TEST
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.RANDOMF.test <- predict(modelo.randomForest, 
+                              Xtestset[,-1])
+plot(Xtestset[,1],predict.RANDOMF.test, lty=1, col="red", main="Random Forest Test")
+
+ms2_RANDOMF_test  <- sum((desnormalizar(predict.RANDOMF.test) - desnormalizar(Xtestset[,1]))^2)/length(Xtestset[,1])
+msX_RANDOMF_test  <- sum((desnormalizar(predict.RANDOMF.test) - desnormalizar(Xtestset[,1])))/length(Xtestset[,1])
+ms2_RANDOMF_test
+sqrt(ms2_RANDOMF_test)
+msX_RANDOMF_test
+t(ms2_RANDOMF_test)
+mean(datos.entrada.Train$MEDIDA)
+median(datos.entrada.Train$MEDIDA)
+sd(datos.entrada.Train$MEDIDA)
+
+summary(datos.entrada.TX)
+summary(desnormalizar(predict.RANDOMF.test))
+sd(desnormalizar(predict.RANDOMF.test))
+```
+### 4.6. SVM
+
+Model Decidido.
+```{r}
+set.seed(13)
+modelo.svm <- svm(my_formula, data = trainset, kernel = "polynomial", cost = 1, coef0=5)
+
+
+```
+
+Prediccion de BEST SVM TRAIN
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.SVM.train <- predict(modelo.svm, 
+                              Xtrainset[,-1])
+plot(Xtrainset[,1],predict.SVM.train, lty=1, col="red", main="SVM train")
+
+ms2_SVM_train =  ms2.test.ln1 <- sum((desnormalizar(predict.SVM.train) - desnormalizar(Xtrainset[,1]))^2)/length(Xtrainset[,1])
+ms2_SVM_train
+```
+
+Prediccion de BEST SVM TEST
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.SVM.test <- predict(modelo.svm, 
+                              Xtestset[,-1])
+plot(Xtestset[,1],predict.SVM.test, lty=1, col="red", main="SVM test")
+
+ms2_SVM_test = ms2.test.ln1 <- sum((desnormalizar(predict.SVM.test) - desnormalizar(Xtestset[,1]))^2)/length(Xtestset[,1])
+ms2_SVM_test
+
+```
+### 4.7. GBM
+
+
+```{r}
+set.seed(13)
+numTrees = 500
+modelo.gbm <- gbm(formula = my_formula, 
+               #distribution = "bernoulli",
+               #distribution = "poisson",
+               distribution = "laplace",
+               data = trainset,
+               n.trees = numTrees,
+               interaction.depth = 20,
+               shrinkage = 0.3,
+               bag.fraction = 0.5,
+               train.fraction = 1.0,
+               n.cores = NULL)  #will use all cores by default
+
+plot(modelo.gbm)
+```
+
+Prediccion de BEST GBM TRAIN
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.gbm.train <- predict(modelo.gbm, 
+                              Xtrainset[,-1],n.trees = numTrees)
+plot(Xtrainset[,1],predict.gbm.train, lty=1, col="red", main="GBM train")
+
+ms2_gbm_train =  ms2.test.ln1 <- sum((desnormalizar(predict.gbm.train) - desnormalizar(Xtrainset[,1]))^2)/length(Xtrainset[,1])
+ms2_gbm_train
+```
+
+Prediccion de BEST gbm TEST
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.GBM.test <- predict(modelo.gbm, 
+                              Xtestset[,-1],n.trees = numTrees)
+plot(Xtestset[,1],predict.GBM.test, lty=1, col="red", main="GBM test")
+
+ms2_GBM_test = ms2.test.ln1 <- sum((desnormalizar(predict.GBM.test) - desnormalizar(Xtestset[,1]))^2)/length(Xtestset[,1])
+ms2_GBM_test
+```
+### 4.8. NEURAL
+
+
+```{r}
+set.seed(13)
+modelo.neural <- neuralnet(my_formula , 
+                         data =trainset, hidden = c(10,5)
+                         # ,stepmax = 1e6
+                         # , act.fct = 'tanh'
+                         , threshold = 0.05
+                         , lifesign = "full"
+                         , rep= 10
+                         # , algrithm = "backprop", learningrate = 1e-3
+)
+
+
+plot(modelo.neural)
+```
+
+Prediccion de BEST NEURAL TRAIN
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.NEURAL.train <- compute(modelo.neural, 
+                              Xtrainset[,-1])$net.result
+plot(Xtrainset[,1],predict.NEURAL.train, lty=1, col="red", main="Neural train")
+
+ms2_NEURAL_train =  ms2.test.ln1 <- sum((desnormalizar(predict.NEURAL.train) - desnormalizar(Xtrainset[,1]))^2)/length(Xtrainset[,1])
+ms2_NEURAL_train
+```
+
+Prediccion de BEST NEURAL TEST
+```{r}
+# knn returns the max probability. Rebuild the data
+predict.NEURAL.test <- compute(modelo.neural, 
+                              Xtestset[,-1])$net.result
+plot(Xtestset[,1],predict.NEURAL.test, lty=1, col="red", main="Neural test")
+
+ms2_NEURAL_test = ms2.test.ln1 <- sum((desnormalizar(predict.NEURAL.test) - desnormalizar(Xtestset[,1]))^2)/length(Xtestset[,1])
+ms2_NEURAL_test
+```
+
+
+```{r}
+```

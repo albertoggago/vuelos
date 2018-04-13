@@ -1,0 +1,9 @@
+{
+	"fromEmail" : "albertoggago2@albertoggago.es",
+	"sslServer" : "albertoggago.es",
+	"pwdServer" : "Gemaxana1973#",
+	"url" :  "mongodb://vuelosXX:vuelosXX@localhost:27017/vuelosXX?ssl=true&authSource=admin&ssl_ca_certs=/home/alberto/datos/ssl/mongodb.pem&ssl_match_hostname=false",
+    "nameDB" : "vuelosXX",
+    "env": "TEST",
+    "urlSelenium":"http://127.0.0.1:4444/wd/hub"
+}
