@@ -60,7 +60,8 @@ class Vuelos(object):
             borrados = self.vaciar_dia()
             print "-- INFO -- vaciamos informacion -- Vuelos borrados del dia: {0}"\
                   .format(borrados.deleted_count)
-            ConstruirUrls(self.mongodbaccess, self.level_log)
+            urls = ConstruirUrls(self.mongodbaccess, self.level_log).construir()
+            print "-- INFO -- construir urls -- numero de URLS: {0}".format(urls)
         else:
             print "-- INFO -- MODO 0 suave solo si hay datos que ejecutar"
             #proceso soft miramos si hay algo que procesar
@@ -72,7 +73,8 @@ class Vuelos(object):
                 if self.ultimo_dia < self.dia_hoy:
                     # ultimo dia es anterior a hoy a las 12... no se ha procesado
                     print "++ WARN ++  1.1 PRIMERA VEZ DEL DIA creamos las URLS y seguimos"
-                    ConstruirUrls(self.mongodbaccess, self.level_log)
+                    urls = ConstruirUrls(self.mongodbaccess, self.level_log).construir()
+                    print "-- INFO -- construir urls -- numero de URLS: {0}".format(urls)
                 else:
                     # ultimo dia posterior hoy a las 12... esta todo Ok
                     print "++ WARN ++  1.2 SE HA PROCESADO TODO Y NO HAY NADA QUE HACER"
@@ -82,7 +84,9 @@ class Vuelos(object):
                     print "** ERROR **  2.1 AYER NO SE EJECUTARON TODOS LOS VUELOS"
                     self.logger.error("AYER no se ejecutaron todos los vuelos")
                     self.alerta_problemas(23, extra="AYER no se ejecutaron todos los vuelos")
-                    ConstruirUrls(self.mongodbaccess, self.level_log)
+                    urls = ConstruirUrls(self.mongodbaccess, self.level_log).construir()
+                    print "-- INFO -- construir urls -- numero de URLS: {0}".format(urls)
+
                 else:
                     #hay cosas que ejecutar
                     print "++ WARN ++  2.2 HA HABIDO UNA CANCELACION y el "\
@@ -138,12 +142,12 @@ class Vuelos(object):
                 #driver.find_element_by_class_name("gws-flights-results__more").click()
                 #driver.find_element_by_xpath("//*[contains(text(), 'SELECT FLIGHT')]").click()
                 ele_insert = {"dBusqueda":d_busqueda, "precio":precio, \
-                       "tipo":tipo, "horaS":hora_s, \
+                       "type":tipo, "horaS":hora_s, \
                        "horaLl":"", "company":compania, "duracion":duracion, \
                        "escalas":escalas, "from":ele["from"], "to":ele["to"], \
                            "dateDirect":ele["dateDirect"], "dateReturn":ele["dateReturn"], \
-                       "type":ele["type"], "query":ele["query"], \
-                       "holidays": self.holidays.get_holidays(ele["dateDirect"], ele["dateReturn"])}
+                       "holidays": \
+                          self.holidays.get_number_holidays(ele["dateDirect"], ele["dateReturn"])}
                 #print(ele_insert)
                 self.mongodbaccess.insert("vuelos", ele_insert)
                 suma_vuelos += 1

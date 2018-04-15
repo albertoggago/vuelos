@@ -26,7 +26,7 @@ class Holidays(object):
         self.bank_holidays.append([2018, 12, 26])
         self.bank_holidays.append([2018, 12, 27])
 
-    def get_holidays(self, date_orig, date_end):
+    def get_number_holidays(self, date_orig, date_end):
         """ doc to explain """
         num_holidays = 0
         date_index = date_orig

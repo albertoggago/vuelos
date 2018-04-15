@@ -24,19 +24,19 @@ def test_bank_holidays_not():
 def test_get_holidays_weekend():
     """test holidays run ok"""
     holidays = Holidays("DEBUG")
-    assert  holidays.get_holidays(datetime.datetime(2018, 4, 21),\
+    assert  holidays.get_number_holidays(datetime.datetime(2018, 4, 21),\
                                   datetime.datetime(2018, 4, 22)) == 2
 
 def test_get_holidays_no_weekend():
     """test holidays run ok"""
     holidays = Holidays("DEBUG")
-    assert  holidays.get_holidays(datetime.datetime(2018, 4, 23),\
+    assert  holidays.get_number_holidays(datetime.datetime(2018, 4, 23),\
                                   datetime.datetime(2018, 4, 27)) == 0
 
 def test_get_holidays_bankholiday():
     """test holidays run ok"""
     holidays = Holidays("DEBUG")
-    assert  holidays.get_holidays(datetime.datetime(2018, 5, 4),\
+    assert  holidays.get_number_holidays(datetime.datetime(2018, 5, 4),\
                                   datetime.datetime(2018, 5, 7)) == 3
 
 def test_get_holiday_weekend():

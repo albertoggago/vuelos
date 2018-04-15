@@ -23,59 +23,82 @@ class ConstruirUrls(object):
         self.holidays = Holidays(level_log)
         self.mongodbaccess = mongodbaccess
 
-        fecha_actual = datetime.datetime.now()
+    def construir(self):
+        """Run all process"""
         borrados = self.mongodbaccess.delete_many("urls", {})
         self.logger.warn("-- INFO -- vaciamos informacion -- URLS borradas: %d",\
               borrados.deleted_count)
-        suma_urls = 0
-        for ele in self.buscar_elementos_busquedas():
-            busqueda_activa = False
-            date_direct = ele["fromDateInit"]
-            while date_direct <= ele["fromDateEnd"]:
-                if ele["type"] == "o":
-                    if date_direct > fecha_actual:
-                        busqueda_activa = True
-                        suma_urls += self.crear_guardar_url(ele, date_direct, date_direct)
-                else:
-                    date_return = ele["toDateInit"]
-                    while date_return <= ele["toDateEnd"]:
-                        if (date_direct <= date_return) and(date_direct > fecha_actual):
-                            dif = (date_return - date_direct) + datetime.timedelta(days=1)
-                            if dif <= datetime.timedelta(days=ele["maxDays"]) and\
-                               dif >= datetime.timedelta(days=ele["minDays"]) and\
-                               (self.holidays.get_holidays(date_direct, date_return)\
-                                       >= ele["minHolidays"]):
-                                suma_urls += self.crear_guardar_url(ele, date_direct, date_return)
-                                busqueda_activa = True
-                        date_return = date_return+datetime.timedelta(days=1)
-                date_direct = date_direct+datetime.timedelta(days=1)
-            if not busqueda_activa:
-                print "-- INFO -- desactivamos la busqueda: {0}".format(ele)
-                self.mongodbaccess.update_one("busquedas", {"_id":ele["_id"]}, {"activa":False})
+        return sum(self.build_one_search(search) for search in self.buscar_elementos_busquedas())
 
-        print "-- INFO -- construir urls -- numero de URLS: {0}".format(suma_urls)
+    def build_one_search(self, ele):
+        """each element of busqueda create urls"""
+        self.logger.warn("new element %s", ele)
+        suma_por_busqueda = 0
+        date_direct = ele.get("fromDateInit",\
+                              datetime.datetime.now()+datetime.timedelta(days=1))
+        while date_direct <= ele.get("fromDateEnd", datetime.datetime.now()):
+            if ele.get("type", "o") == "o":
+                suma_por_busqueda += \
+                    self.revisar_guardar_url_only(ele, date_direct)
+            else:
+                date_return = ele.get("toDateInit",\
+                              datetime.datetime.now()+datetime.timedelta(days=1))
+                while date_return <= ele.get("toDateEnd", datetime.datetime.now()):
+                    suma_por_busqueda += \
+                         self.revisar_guardar_url_return(ele, date_direct, date_return)
+                    date_return = date_return+datetime.timedelta(days=1)
+            date_direct = date_direct+datetime.timedelta(days=1)
+        if suma_por_busqueda == 0:
+            self.logger.warn("-- INFO -- desactivamos la busqueda: %s", ele)
+            self.mongodbaccess.update_one("busquedas", {"_id":ele["_id"]}, {"activa":False})
+        return suma_por_busqueda
 
     def buscar_elementos_busquedas(self):
         """ doc to explain """
         return self.mongodbaccess.find("busquedas", {"activa":True})
 
-    def crear_guardar_url(self, datos, date_direct, date_return):
+    def revisar_guardar_url_only(self, ele, date_direct):
+        """review for return flights if can save"""
+        if (date_direct > datetime.datetime.now()) and \
+           (self.holidays.get_number_holidays(date_direct, date_direct)\
+            >= ele.get("minHolidays", 0)):
+            return self.guardar_url(crear_url(ele, date_direct, date_direct))
+        return 0
+
+    def revisar_guardar_url_return(self, ele, date_direct, date_return):
+        """review for return flights if can save"""
+        if (date_direct <= date_return) and(date_direct > datetime.datetime.now()):
+            dif = (date_return - date_direct) + datetime.timedelta(days=1)
+            if dif <= datetime.timedelta(days=ele.get("maxDays", 0)) and\
+               dif >= datetime.timedelta(days=ele.get("minDays", 0)) and\
+               (self.holidays.get_number_holidays(date_direct, date_return)\
+                >= ele.get("minHolidays", 0)):
+                return self.guardar_url(crear_url(ele, date_direct, date_return))
+        return 0
+
+    def guardar_url(self, urls):
         """ doc to explain """
-        if datos["type"] == "o":
-            url = "https://www.google.es/flights/#flt="+datos["from"]+"."+datos["to"]+"."\
-                +date_direct.strftime("%Y-%m-%d")\
-                + "*"+datos["to"]+"."+datos["from"]+"."\
-                +";c:EUR;e:1;sd:1;t:f;tt:o"
-        else:
-            url = "https://www.google.es/flights/#flt="+datos["from"]+"."+datos["to"]+"."\
-                +date_direct.strftime("%Y-%m-%d")\
-                + "*"+datos["to"]+"."+datos["from"]+"."\
-                +date_return.strftime("%Y-%m-%d")\
-                +";c:EUR;e:1;sd:1;t:f"
-        existe = self.mongodbaccess.find_one("urls", {"url":url})
+        existe = self.mongodbaccess.find_one("urls", {"url":urls.get("url", "ERROR")})
         if existe is None:
-            self.mongodbaccess.insert("urls", {"url":url, "from":datos["from"], "to":datos["to"],\
-                                 "dateDirect":date_direct, "dateReturn":date_return,\
-                                 "type":datos["type"], "query":datos["query"]})
+            self.mongodbaccess.insert("urls", urls)
             return 1
         return 0
+
+def crear_url(datos, date_direct, date_return):
+    """ doc to explain """
+    if datos.get("type", "o") == "o":
+        url = "https://www.google.es/flights/#flt="+datos.get("from", "XXX")+"."\
+            +datos.get("to", "XXX")+"."\
+            +date_direct.strftime("%Y-%m-%d")\
+            +";c:EUR;e:1;sd:1;t:f;tt:o"
+    else:
+        url = "https://www.google.es/flights/#flt="+datos.get("from", "XXX")+"."\
+            +datos.get("to", "XXX")+"."\
+            +date_direct.strftime("%Y-%m-%d")\
+            + "*"+datos.get("to", "XXX")+"."+datos.get("from", "XXX")+"."\
+            +date_return.strftime("%Y-%m-%d")\
+            +";c:EUR;e:1;sd:1;t:f"
+
+    return {"url":url, "from":datos.get("from", "XXX"), "to":datos.get("to", "XXX"),\
+            "dateDirect":date_direct, "dateReturn":date_return,\
+            "type":datos.get("type", "XXX")}
