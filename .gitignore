@@ -1,5 +1,6 @@
-pythonBatch/logOld/
-pythonBatch/log/*
+/pythonBatch/test/log/
+/pythonBatch/logOld/
+/pythonBatch/log/*
 /pythonBatch/pyproj/log/*
 /pythonBatch/pyproj/logOld/*
 /pythonBatch/test/log/*	
@@ -8,5 +9,5 @@ pythonBatch/log/*
 
 *.pyc
 
-pythonBatch/test/results.xml
-pythonBatch/test/.cache
+/pythonBatch/test/results.xml
+/pythonBatch/test/.cache

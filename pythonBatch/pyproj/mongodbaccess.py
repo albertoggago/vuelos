@@ -44,11 +44,12 @@ class MongoDBAccess(object):
             self.logger.error("Authentication failure")
             return False
 
-    def find_one(self, collection, query):
+    def find_one(self, collection, query, sort=None):
         """Find one element only return a json element"""
         if self.status():
+            sort = None if sort is None else sort.items()
             self.logger.info("Access to collection: %s, query %s", collection, query)
-            return self.db_access[collection].find_one(query)
+            return self.db_access[collection].find_one(query, sort=sort)
         else:
             self.logger.error("Database Not INIT Find_one")
             return None

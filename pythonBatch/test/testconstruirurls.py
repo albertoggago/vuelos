@@ -8,7 +8,7 @@ import datetime
 
 sys.path.insert(0, "..")
 try:
-    from pyproj.construirurls import ConstruirUrls
+    from pyproj.buildurls import BuildUrls
     from pyproj.mongodbaccess import MongoDBAccess
 except ImportError:
     print 'No Import'
@@ -16,7 +16,7 @@ except ImportError:
 FILE_CONFIG = "../test/config/configOk.json"
 CONFIG2 = json.loads(open(FILE_CONFIG, "r").read())
 MONGO_DB_ACCESS = MongoDBAccess(CONFIG2, "DEBUG")
-CONSTRUIR_URLS = ConstruirUrls(MONGO_DB_ACCESS, "DEBUG")
+CONSTRUIR_URLS = BuildUrls(MONGO_DB_ACCESS, "DEBUG")
 
 def test_construir_error():
     """test vuelos run ok"""
@@ -25,7 +25,7 @@ def test_construir_error():
     busqueda = {"activa":True}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find_one("urls", {})
 
     assert urls_cursor is None
@@ -40,7 +40,7 @@ def test_construir_min():
                 "fromDateEnd": datetime.datetime(2019, 1, 10)}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     total = sum(1 for result in urls_cursor)
 
@@ -59,7 +59,7 @@ def test_construir_min_return_void():
                 "type":"v"}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     total = sum(1 for result in urls_cursor)
 
@@ -79,7 +79,7 @@ def test_construir_min_return_date():
                 "type":"v"}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     total = sum(1 for result in urls_cursor)
 
@@ -95,7 +95,7 @@ def test_construir_one():
                 "fromDateEnd": datetime.datetime(2019, 1, 1)}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     total = sum(1 for result in urls_cursor)
 
@@ -118,7 +118,7 @@ def test_construir_one_return():
                 "type":"v"}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     total = sum(1 for result in urls_cursor)
 
@@ -142,7 +142,7 @@ def test_construir_two_five_days():
                 "type":"v"}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     total = sum(1 for result in urls_cursor)
     urls_cursor2 = MONGO_DB_ACCESS.find("urls", {})
@@ -167,7 +167,7 @@ def test_construir_2_5_1_holiday():
                 "type":"v"}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     total = sum(1 for result in urls_cursor)
     urls_cursor2 = MONGO_DB_ACCESS.find("urls", {})
@@ -192,7 +192,7 @@ def test_construir_2_5_2_holiday():
                 "type":"v"}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     total = sum(1 for result in urls_cursor)
     urls_cursor2 = MONGO_DB_ACCESS.find("urls", {})
@@ -214,7 +214,7 @@ def test_construir_with_data_real():
                 "type":"o"}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     url = urls_cursor.next()
 
@@ -242,7 +242,7 @@ def test_construir_with_data_real_r():
                 "type":"v"}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     url = urls_cursor.next()
 
@@ -266,7 +266,7 @@ def test_construir_desactivate():
                 "type":"0"}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     total = sum(1 for result in urls_cursor)
     busquedas = MONGO_DB_ACCESS.find_one("busquedas", {})
@@ -288,7 +288,7 @@ def test_construir_desactivate_ret():
                 "type":"v"}
     MONGO_DB_ACCESS.insert("busquedas", busqueda)
 
-    sum_urls = CONSTRUIR_URLS.construir()
+    sum_urls = CONSTRUIR_URLS.build_urls()
     urls_cursor = MONGO_DB_ACCESS.find("urls", {})
     total = sum(1 for result in urls_cursor)
 

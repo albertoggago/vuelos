@@ -4,10 +4,7 @@
 """vuelos"""
 
 import datetime
-import time
 import json
-#import smtplib
-from email.mime.text import MIMEText
 
 from selenium.common.exceptions import StaleElementReferenceException
 from selenium.common.exceptions import TimeoutException
@@ -17,31 +14,25 @@ from pyproj.seleniumaccess import SeleniumAccess
 from pyproj.mongodbaccess import MongoDBAccess
 from pyproj.holidays import Holidays
 from pyproj.logger import Logger
-from pyproj.construirurls import ConstruirUrls
+from pyproj.buildurls import BuildUrls
 
 
 class Vuelos(object):
     """find Flight"""
 
-    eurls = []
-    ultimo_dia = datetime.datetime(2000, 01, 01)
-    dia_hoy = datetime.datetime(datetime.date.today().year,\
-                 datetime.date.today().month, datetime.date.today().day, 0, 0, 0, 0)
-    cantidad_ciclo = 500
-
+    urls = []
     seleniumaccess = None
     mongodbaccess = None
     logger = None
-    config = None
     holidays = None
 
     def __init__(self, file_config, level_log):
         self.level_log = level_log
         self.logger = Logger(self.__class__.__name__, level_log).get()
         try:
-            self.config = json.loads(open(file_config, "r").read())
-            self.mongodbaccess = MongoDBAccess(self.config, level_log)
-            self.seleniumaccess = SeleniumAccess(self.config, level_log)
+            config = json.loads(open(file_config, "r").read())
+            self.mongodbaccess = MongoDBAccess(config, level_log)
+            self.seleniumaccess = SeleniumAccess(config, level_log)
             self.holidays = Holidays(level_log)
         except IOError:
             self.logger.error("File Error: %s", file_config)
@@ -56,35 +47,33 @@ class Vuelos(object):
             print "-- INFO -- MODO 1 duro ejecuta y limpia los datos del dia"
             #proceso duro vaciamos informacion y empezamos
             print "++ INFO ++ Vaciamos informacion del dia"
-            print "-- INFO -- dia: {0}".format(self.dia_hoy)
+            print "-- INFO -- dia: {0}".format(today())
             borrados = self.vaciar_dia()
             print "-- INFO -- vaciamos informacion -- Vuelos borrados del dia: {0}"\
                   .format(borrados.deleted_count)
-            urls = ConstruirUrls(self.mongodbaccess, self.level_log).construir()
+            urls = BuildUrls(self.mongodbaccess, self.level_log).build_urls()
             print "-- INFO -- construir urls -- numero de URLS: {0}".format(urls)
         else:
             print "-- INFO -- MODO 0 suave solo si hay datos que ejecutar"
             #proceso soft miramos si hay algo que procesar
             self.cargar_urls()
-            self.buscar_dia()
             #si no hay nada que procesar o el dia no se ha ejecutado.
             if len(self.urls) == 0:
                 #no hay nada que ejecutar
-                if self.ultimo_dia < self.dia_hoy:
+                if self.find_last_day() < today():
                     # ultimo dia es anterior a hoy a las 12... no se ha procesado
                     print "++ WARN ++  1.1 PRIMERA VEZ DEL DIA creamos las URLS y seguimos"
-                    urls = ConstruirUrls(self.mongodbaccess, self.level_log).construir()
+                    urls = BuildUrls(self.mongodbaccess, self.level_log).build_urls()
                     print "-- INFO -- construir urls -- numero de URLS: {0}".format(urls)
                 else:
                     # ultimo dia posterior hoy a las 12... esta todo Ok
                     print "++ WARN ++  1.2 SE HA PROCESADO TODO Y NO HAY NADA QUE HACER"
             else:
-                if self.ultimo_dia < self.dia_hoy:
+                if self.find_last_day() < today():
                     # prblemas en el paraiso ayer la cosa no fue bien. Reiniciamos y procesamos
                     print "** ERROR **  2.1 AYER NO SE EJECUTARON TODOS LOS VUELOS"
                     self.logger.error("AYER no se ejecutaron todos los vuelos")
-                    self.alerta_problemas(23, extra="AYER no se ejecutaron todos los vuelos")
-                    urls = ConstruirUrls(self.mongodbaccess, self.level_log).construir()
+                    urls = BuildUrls(self.mongodbaccess, self.level_log).build_urls()
                     print "-- INFO -- construir urls -- numero de URLS: {0}".format(urls)
 
                 else:
@@ -92,12 +81,10 @@ class Vuelos(object):
                     print "++ WARN ++  2.2 HA HABIDO UNA CANCELACION y el "\
                           +"SISTEMA SIGUE DESDE ESE PUNTO"
                     self.logger.error("Ha habido una cancelacion y se sigue desde ese punto")
-            if self.ultimo_dia < self.dia_hoy:
-                self.alerta_problemas(hora=int(time.strftime("%H")))
         self.cargar_urls()
         cantidad = [0, 0, 0]
         while len(self.urls) > 0:
-            cantidad_nueva = self.proceso_urls(self.cantidad_ciclo)
+            cantidad_nueva = self.proceso_urls()
             for i in range(0, len(cantidad)):
                 cantidad[i] = cantidad[i] + cantidad_nueva[i]
         print "++ INFO -- TOTAL PROCESO, vuelos guardados: {0}".format(cantidad[0])
@@ -106,23 +93,18 @@ class Vuelos(object):
 
     def vaciar_dia(self):
         """ delete all info of day """
-        return self.mongodbaccess.delete_many("vuelos", {"dBusqueda":{"$gt":self.dia_hoy}})
+        return self.mongodbaccess.delete_many("vuelos", {"dBusqueda":{"$gt":today()}})
 
-    def proceso_urls(self, elementos):
+    def proceso_urls(self):
         """ doc to explain """
         errores = 0
         error_no_encontrado = 0
         print "++ INFO ++ Procesar cada URL"
         suma_vuelos = 0
-        if len(self.urls) < 10:
-            elementos = len(self.urls)
 
-        datos = self.urls[:elementos]
-
-        del self.urls[:elementos]
         self.seleniumaccess.open_selenium()
         driver = self.seleniumaccess.driver
-        for ele in datos:
+        for ele in self.urls:
             url = ele["url"]
             driver.get(url)
             try:
@@ -184,46 +166,17 @@ class Vuelos(object):
             self.urls.append(url)
         print "-- INFO -- cargar urls -- numero de URLS: {0}".format(len(self.urls))
 
-    def buscar_dia(self):
+    def find_last_day(self):
         """ doc to explain """
-        print "++ INFO ++ buscar_dia"
-        datos = self.mongodbaccess.find("vuelos", {}, sort={"dBusqueda":-1}, limite=1)
-        for ultimo in datos:
-            self.ultimo_dia = ultimo['dBusqueda']
-        print "-- INFO -- buscar dia -- dia base de datos: {0}".format(self.ultimo_dia)
-        print "-- INFO -- buscar dia -- dia actual: {0}".format(self.dia_hoy)
-
-
-    def alerta_problemas(self, hora, extra=""):
-        """ doc to explain """
-        print "++ INFO ++ REVISAMOS SI HAY QUE ENVIAR UN CORREO"
-        print "++ INFO ++ hora Ejecucion {0}".format(hora)
-        if hora > 12:
-            from_email = 'albertoggagocurro@albertoggago.es'
-            #ssl_server = 'albertoggago.es'
-            #pwd_server = 'Gemaxana1973#'
-
-            print "++ INFO ++ ENVIAMOS CORREO DE ALERTA"
-            #smtp_ssl_host = 'mail.albertoggago.es'
-            #smtp_ssl_port = 465
-            #username = from_email
-            #password = pwd_server
-            sender = from_email
-            targets = ['albertoggago@gmail.com']
-            msg = MIMEText('ERROR EN LA CARGA DE VUELOS '+extra)
-            msg['Subject'] = 'ERROR EN LA CARGA DE VUELOS '
-            msg['From'] = sender
-            msg['To'] = ', '.join(targets)
-
-            #agg asteriscamos porque no funciona
-            #server = smtplib.SMTP_SSL(smtp_ssl_host, smtp_ssl_port)
-            #server.login(username, password)
-            #server.sendmail(sender, targets, msg.as_string())
-            #server.quit()
+        print "++ INFO ++ find_last_day"
+        if self.mongodbaccess.find_one("vuelos", {}, sort={"dBusqueda":-1}) is None:
+            return datetime.datetime(2000, 01, 01)
+        else:
+            return self.mongodbaccess.find_one("vuelos", {}, sort={"dBusqueda":-1}).get("dBusqueda","")
 
     def limpiar(self):
         """ doc to explain """
-        print "++INFO -- LIMPIAR FASE I"
+        print "++INFO-- LIMPIAR FASE I"
         #detectamos todos los vuelos con mas de 7 dias y me quedo con el mejor precio.
         fecha7 = datetime.datetime.now()-datetime.timedelta(days=7)
         proceso = []
@@ -256,3 +209,10 @@ class Vuelos(object):
             print elemento
             suma += 1
         print "TOTAL: procesados {0}, borrados {1}, movidos {2}".format(suma, borrados, movidos)
+
+def today():
+    """return today format datetime with 0 in hour, ... """
+    return datetime.datetime(datetime.date.today().year,\
+                             datetime.date.today().month,\
+                             datetime.date.today().day, 0, 0, 0, 0)
+
