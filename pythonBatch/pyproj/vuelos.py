@@ -20,7 +20,7 @@ from pyproj.buildurls import BuildUrls
 class Vuelos(object):
     """find Flight"""
 
-    urls = []
+    level_log = None
     seleniumaccess = None
     mongodbaccess = None
     logger = None
@@ -56,9 +56,8 @@ class Vuelos(object):
         else:
             print "-- INFO -- MODO 0 suave solo si hay datos que ejecutar"
             #proceso soft miramos si hay algo que procesar
-            self.cargar_urls()
             #si no hay nada que procesar o el dia no se ha ejecutado.
-            if len(self.urls) == 0:
+            if self.return_urls().count() == 0:
                 #no hay nada que ejecutar
                 if self.find_last_day() < today():
                     # ultimo dia es anterior a hoy a las 12... no se ha procesado
@@ -81,12 +80,7 @@ class Vuelos(object):
                     print "++ WARN ++  2.2 HA HABIDO UNA CANCELACION y el "\
                           +"SISTEMA SIGUE DESDE ESE PUNTO"
                     self.logger.error("Ha habido una cancelacion y se sigue desde ese punto")
-        self.cargar_urls()
-        cantidad = [0, 0, 0]
-        while len(self.urls) > 0:
-            cantidad_nueva = self.proceso_urls()
-            for i in range(0, len(cantidad)):
-                cantidad[i] = cantidad[i] + cantidad_nueva[i]
+        cantidad = self.proceso_urls()
         print "++ INFO -- TOTAL PROCESO, vuelos guardados: {0}".format(cantidad[0])
         print "++ INFO -- TOTAL PROCESO, errores sin Informacion: {0}".format(cantidad[1])
         print "++ INFO -- TOTAL PROCESO, errores NO ENCONTRADO: {0}".format(cantidad[2])
@@ -104,15 +98,16 @@ class Vuelos(object):
 
         self.seleniumaccess.open_selenium()
         driver = self.seleniumaccess.driver
-        for ele in self.urls:
-            url = ele["url"]
+        for ele in self.return_urls():
+            url = ele.get("url", "http://google.es")
             driver.get(url)
             try:
-                #print(url)
                 d_busqueda = datetime.datetime.now()
                 precio_string = driver.find_element_by_class_name("gws-flights-results__price").text
-                print precio_string
                 precio = float(precio_string[1:].replace(".", "").replace(", ", "."))
+                print "flight: {0} {1} date: {2} {3} price: {4}".\
+                      format(ele.get("from", "XXX"), ele.get("to", "XXX"), \
+                             ele.get("dateDirect", "XXX"), ele["dateReturn"], precio)
                 tipo = driver\
                        .find_element_by_class_name("gws-flights-results__price-annotation").text
                 hora_s = driver.find_element_by_class_name("gws-flights-results__times").text
@@ -126,10 +121,13 @@ class Vuelos(object):
                 ele_insert = {"dBusqueda":d_busqueda, "precio":precio, \
                        "type":tipo, "horaS":hora_s, \
                        "horaLl":"", "company":compania, "duracion":duracion, \
-                       "escalas":escalas, "from":ele["from"], "to":ele["to"], \
-                           "dateDirect":ele["dateDirect"], "dateReturn":ele["dateReturn"], \
+                       "escalas":escalas, "from":ele.get("from", "XXX"), \
+                       "to":ele.get("to", "XXX"), \
+                       "dateDirect":ele.get("dateDirect", "XXX"), \
+                       "dateReturn":ele["dateReturn"], \
                        "holidays": \
-                          self.holidays.get_number_holidays(ele["dateDirect"], ele["dateReturn"])}
+                          self.holidays.get_number_holidays(ele.get("dateDirect", "XXX"), \
+                                                            ele["dateReturn"])}
                 #print(ele_insert)
                 self.mongodbaccess.insert("vuelos", ele_insert)
                 suma_vuelos += 1
@@ -157,14 +155,9 @@ class Vuelos(object):
         return([suma_vuelos, errores, error_no_encontrado])
 
 
-    def cargar_urls(self):
+    def return_urls(self):
         """ doc to explain """
-        print "++ INFO ++ cargar urls"
-        datos = self.mongodbaccess.find("urls", {})
-        self.urls = []
-        for url in datos:
-            self.urls.append(url)
-        print "-- INFO -- cargar urls -- numero de URLS: {0}".format(len(self.urls))
+        return self.mongodbaccess.find("urls", {})
 
     def find_last_day(self):
         """ doc to explain """
@@ -172,43 +165,8 @@ class Vuelos(object):
         if self.mongodbaccess.find_one("vuelos", {}, sort={"dBusqueda":-1}) is None:
             return datetime.datetime(2000, 01, 01)
         else:
-            return self.mongodbaccess.find_one("vuelos", {}, sort={"dBusqueda":-1}).get("dBusqueda","")
-
-    def limpiar(self):
-        """ doc to explain """
-        print "++INFO-- LIMPIAR FASE I"
-        #detectamos todos los vuelos con mas de 7 dias y me quedo con el mejor precio.
-        fecha7 = datetime.datetime.now()-datetime.timedelta(days=7)
-        proceso = []
-        proceso.append({'$match':{'dateDirect':{'$lt':fecha7}}})
-        proceso.append({'$group':{'_id':{'dateDirect':'$dateDirect',\
-                        'from':'$from', 'to':'$to', 'horaS':'$horaS'},\
-                        'suma':{'$sum':1}, 'precio':{'$min':'$precio'}}})
-        proceso.append({'$match':{'suma':{'$gt':1}}})
-        aggregate_find = self.mongodbaccess.aggregate("vuelos", proceso)
-        suma = 0
-        borrados = 0
-        movidos = 0
-        for elemento in aggregate_find:
-            #procedemos a seleccionar copiar a vuelosBK
-            vuelos_find = self.mongodbaccess.find("vuelos",\
-                                              {'dateDirect':elemento['_id']['dateDirect'],\
-                                              'from':elemento['_id']['from'], \
-                                              'to':elemento['_id']['to'],\
-                                              'horaS':elemento['_id']['horaS']})
-            mejor_precio = False
-            for ele_mover in vuelos_find:
-                if(not mejor_precio) and(ele_mover['precio'] == elemento['precio']):
-                    mejor_precio = True
-                else:
-                    self.mongodbaccess.delete_one("vuelos", {'_id':ele_mover['_id']})
-                    borrados += 1
-                    del ele_mover['_id']
-                    self.mongodbaccess.insert("vuelosBk", ele_mover)
-                    movidos += 1
-            print elemento
-            suma += 1
-        print "TOTAL: procesados {0}, borrados {1}, movidos {2}".format(suma, borrados, movidos)
+            return self.mongodbaccess.find_one("vuelos", {}, sort={"dBusqueda":-1})\
+                                     .get("dBusqueda", "")
 
 def today():
     """return today format datetime with 0 in hour, ... """

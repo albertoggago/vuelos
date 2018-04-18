@@ -4,7 +4,8 @@
 """ Only a Class MongoDBAccess"""
 
 from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure, OperationFailure, ConfigurationError
+from pymongo.errors import ConnectionFailure, OperationFailure, \
+                           ConfigurationError, DuplicateKeyError
 from pyproj.logger import Logger
 
 class MongoDBAccess(object):
@@ -92,7 +93,11 @@ class MongoDBAccess(object):
         """Insert return status of insert"""
         if self.status():
             self.logger.debug("Insert collection: %s, data: %s", collection, element)
-            return self.db_access[collection].insert(element)
+            #control duplicated
+            try:
+                return self.db_access[collection].insert(element)
+            except DuplicateKeyError:
+                return None
         else:
             self.logger.error("Database Not INIT Find")
             return None
