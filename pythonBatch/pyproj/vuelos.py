@@ -6,36 +6,30 @@
 import datetime
 import json
 
-from selenium.common.exceptions import StaleElementReferenceException
-from selenium.common.exceptions import TimeoutException
-from selenium.common.exceptions import NoSuchElementException
 
-from pyproj.seleniumaccess import SeleniumAccess
 from pyproj.mongodbaccess import MongoDBAccess
-from pyproj.holidays import Holidays
 from pyproj.logger import Logger
 from pyproj.buildurls import BuildUrls
+from pyproj.findflights import FindFlights
 
 
 class Vuelos(object):
     """find Flight"""
 
     level_log = None
-    seleniumaccess = None
+    config = None
     mongodbaccess = None
     logger = None
-    holidays = None
 
     def __init__(self, file_config, level_log):
         self.level_log = level_log
         self.logger = Logger(self.__class__.__name__, level_log).get()
         try:
-            config = json.loads(open(file_config, "r").read())
-            self.mongodbaccess = MongoDBAccess(config, level_log)
-            self.seleniumaccess = SeleniumAccess(config, level_log)
-            self.holidays = Holidays(level_log)
+            self.config = json.loads(open(file_config, "r").read())
+            self.mongodbaccess = MongoDBAccess(self.config, level_log)
         except IOError:
             self.logger.error("File Error: %s", file_config)
+            self.config = {}
             self.mongodbaccess = MongoDBAccess({}, level_log)
         self.logger.info("Inicio: %s", datetime.datetime.now())
 
@@ -80,79 +74,16 @@ class Vuelos(object):
                     print "++ WARN ++  2.2 HA HABIDO UNA CANCELACION y el "\
                           +"SISTEMA SIGUE DESDE ESE PUNTO"
                     self.logger.error("Ha habido una cancelacion y se sigue desde ese punto")
-        cantidad = self.proceso_urls()
-        print "++ INFO -- TOTAL PROCESO, vuelos guardados: {0}".format(cantidad[0])
-        print "++ INFO -- TOTAL PROCESO, errores sin Informacion: {0}".format(cantidad[1])
-        print "++ INFO -- TOTAL PROCESO, errores NO ENCONTRADO: {0}".format(cantidad[2])
+        result = FindFlights(self.config, self.mongodbaccess, self.level_log)\
+                   .get_flights(self.return_urls())
+        print "++ INFO -- TOTAL PROCESO, Save: {0}".format(result.get("save", 0))
+        print "++ INFO -- TOTAL PROCESO, errores sin Informacion: {0}".format(result.get("warn", 0))
+        print "++ INFO -- TOTAL PROCESO, errores NO ENCONTRADO: {0}".format(result.get("error", 0))
 
     def vaciar_dia(self):
         """ delete all info of day """
         return self.mongodbaccess.delete_many("vuelos", {"dBusqueda":{"$gt":today()}})
 
-    def proceso_urls(self):
-        """ doc to explain """
-        errores = 0
-        error_no_encontrado = 0
-        print "++ INFO ++ Procesar cada URL"
-        suma_vuelos = 0
-
-        self.seleniumaccess.open_selenium()
-        driver = self.seleniumaccess.driver
-        for ele in self.return_urls():
-            url = ele.get("url", "http://google.es")
-            driver.get(url)
-            try:
-                d_busqueda = datetime.datetime.now()
-                precio_string = driver.find_element_by_class_name("gws-flights-results__price").text
-                precio = float(precio_string[1:].replace(".", "").replace(", ", "."))
-                print "flight: {0} {1} date: {2} {3} price: {4}".\
-                      format(ele.get("from", "XXX"), ele.get("to", "XXX"), \
-                             ele.get("dateDirect", "XXX"), ele["dateReturn"], precio)
-                tipo = driver\
-                       .find_element_by_class_name("gws-flights-results__price-annotation").text
-                hora_s = driver.find_element_by_class_name("gws-flights-results__times").text
-                compania = driver.find_element_by_class_name("gws-flights-results__carriers").text
-                duracion = driver.find_element_by_class_name("gws-flights-results__duration").text
-                escalas = driver\
-                        .find_element_by_class_name("gws-flights-results__itinerary-stops").text
-                #navigate
-                #driver.find_element_by_class_name("gws-flights-results__more").click()
-                #driver.find_element_by_xpath("//*[contains(text(), 'SELECT FLIGHT')]").click()
-                ele_insert = {"dBusqueda":d_busqueda, "precio":precio, \
-                       "type":tipo, "horaS":hora_s, \
-                       "horaLl":"", "company":compania, "duracion":duracion, \
-                       "escalas":escalas, "from":ele.get("from", "XXX"), \
-                       "to":ele.get("to", "XXX"), \
-                       "dateDirect":ele.get("dateDirect", "XXX"), \
-                       "dateReturn":ele["dateReturn"], \
-                       "holidays": \
-                          self.holidays.get_number_holidays(ele.get("dateDirect", "XXX"), \
-                                                            ele["dateReturn"])}
-                #print(ele_insert)
-                self.mongodbaccess.insert("vuelos", ele_insert)
-                suma_vuelos += 1
-                self.mongodbaccess.delete_one("urls", {"url":url})
-            except StaleElementReferenceException as error_ref:
-                errores += 1
-                print "****************************"
-                print url
-                print error_ref
-            except NoSuchElementException as error_no_such:
-                errores += 1
-                print "****************************"
-                print url
-                print error_no_such
-            except TimeoutException as error_time_out:
-                print "-- ERROR -- TimeOut *****************"
-                print "****************************"
-                print url
-                print error_time_out
-                errores += 1
-        if errores > 0:
-            print "-- ERROR -- errores no procesados {0}".format(errores)
-        print "-- INFO -- Vuelos guardados: {0:d}".format(suma_vuelos)
-        self.seleniumaccess.close_selenium()
-        return([suma_vuelos, errores, error_no_encontrado])
 
 
     def return_urls(self):
