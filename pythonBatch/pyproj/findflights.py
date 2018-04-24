@@ -38,6 +38,8 @@ class FindFlights(object):
         self.seleniumaccess.open_selenium()
         driver = self.seleniumaccess.driver
         time.sleep(1)
+        driver.get("http://www.google.com")
+        time.sleep(1)
 
         for url in urls:
             accumulate_dic(result, self.url_to_flight(url, driver))
