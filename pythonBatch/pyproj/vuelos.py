@@ -65,6 +65,7 @@ class Vuelos(object):
                 if self.find_last_day() < today():
                     # prblemas en el paraiso ayer la cosa no fue bien. Reiniciamos y procesamos
                     print "** ERROR **  2.1 AYER NO SE EJECUTARON TODOS LOS VUELOS"
+                    print "** ERROR **  vuelos pendientes {0}".format(self.return_urls().count())
                     self.logger.error("AYER no se ejecutaron todos los vuelos")
                     urls = BuildUrls(self.mongodbaccess, self.level_log).build_urls()
                     print "-- INFO -- construir urls -- numero de URLS: {0}".format(urls)
@@ -73,6 +74,7 @@ class Vuelos(object):
                     #hay cosas que ejecutar
                     print "++ WARN ++  2.2 HA HABIDO UNA CANCELACION y el "\
                           +"SISTEMA SIGUE DESDE ESE PUNTO"
+                    print "++ WARN ++  vuelos pendientes {0}".format(self.return_urls().count())
                     self.logger.error("Ha habido una cancelacion y se sigue desde ese punto")
         result = FindFlights(self.config, self.mongodbaccess, self.level_log)\
                    .get_flights(self.return_urls())

@@ -55,11 +55,17 @@ class FindFlights(object):
             #navigate
             #driver.find_element_by_class_name("gws-flights-results__more").click()
             #driver.find_element_by_xpath("//*[contains(text(), 'SELECT FLIGHT')]").click()
+            if url.get("type", "") == "o":
+                type_flight = driver\
+                  .find_element_by_class_name("gws-flights-form__menu-label").text
+            else:
+                type_flight = driver\
+                  .find_element_by_class_name("gws-flights-results__price-annotation").text
+
             url_insert = \
               {"dBusqueda":datetime.datetime.now(),  \
                "precio":float(precio_string[1:].replace(".", "").replace(", ", ".")), \
-               "type":driver \
-                .find_element_by_class_name("gws-flights-results__price-annotation").text,\
+               "type": type_flight,\
                "horaS":driver.find_element_by_class_name("gws-flights-results__times").text,\
                "horaLl":"",\
                "company":driver.find_element_by_class_name("gws-flights-results__carriers").text,\
