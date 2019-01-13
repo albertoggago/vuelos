@@ -38,6 +38,7 @@ class Holidays(object):
     def get_holiday(self, date):
         """ review if a day is holiday """
         if date.weekday() > 4 or [date.year, date.month, date.day] in self.bank_holidays:
-            return 1
+            ok_value = 1
         else:
-            return 0
+            ok_value = 0
+        return ok_value
