@@ -2,12 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """Test Selenium Access"""
-import sys
+
 import json
 import urllib2
 from selenium.common.exceptions import WebDriverException
 
-sys.path.insert(0, "..")
 from pyproj.seleniumaccess import SeleniumAccess
 
 

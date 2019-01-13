@@ -97,8 +97,7 @@ class Vuelos(object):
         print "++ INFO ++ find_last_day"
         if self.mongodbaccess.find_one("vuelos", {}, sort={"dBusqueda":-1}) is None:
             return datetime.datetime(2000, 01, 01)
-        else:
-            return self.mongodbaccess.find_one("vuelos", {}, sort={"dBusqueda":-1})\
+        return self.mongodbaccess.find_one("vuelos", {}, sort={"dBusqueda":-1})\
                                      .get("dBusqueda", "")
 
 def today():
@@ -106,4 +105,3 @@ def today():
     return datetime.datetime(datetime.date.today().year,\
                              datetime.date.today().month,\
                              datetime.date.today().day, 0, 0, 0, 0)
-

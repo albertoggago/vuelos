@@ -51,9 +51,8 @@ class MongoDBAccess(object):
             sort = None if sort is None else sort.items()
             self.logger.info("Access to collection: %s, query %s", collection, query)
             return self.db_access[collection].find_one(query, sort=sort)
-        else:
-            self.logger.error("Database Not INIT Find_one")
-            return None
+        self.logger.error("Database Not INIT Find_one")
+        return None
 
     def find(self, collection, query, sort=None, limite=None):
         """Find several elements is a cursor, atention for line in cursor is better"""
@@ -63,9 +62,8 @@ class MongoDBAccess(object):
             limite = 0 if limite is None else limite
             sort = None if sort is None else sort.items()
             return self.db_access[collection].find(query, sort=sort, limit=limite)
-        else:
-            self.logger.error("Database Not INIT Find")
-            return None
+        self.logger.error("Database Not INIT Find")
+        return None
 
     def update_one(self, collection, query, change, is_set="set"):
         """Update One return status of update"""
@@ -74,9 +72,8 @@ class MongoDBAccess(object):
                 collection, query, change, is_set)
             setdollar = "$"+is_set
             return self.db_access[collection].update_one(query, {setdollar:change})
-        else:
-            self.logger.error("Database Not INIT Update_one")
-            return None
+        self.logger.error("Database Not INIT Update_one")
+        return None
 
     def update_many(self, collection, query, change, is_set="set"):
         """Update Many return status of update"""
@@ -85,9 +82,8 @@ class MongoDBAccess(object):
                 collection, query, change, is_set)
             setdollar = "$"+is_set
             return self.db_access[collection].update_many(query, {setdollar:change})
-        else:
-            self.logger.error("Database Not INIT Update_one")
-            return None
+        self.logger.error("Database Not INIT Update_one")
+        return None
 
     def insert(self, collection, element):
         """Insert return status of insert"""
@@ -98,42 +94,37 @@ class MongoDBAccess(object):
                 return self.db_access[collection].insert(element)
             except DuplicateKeyError:
                 return None
-        else:
-            self.logger.error("Database Not INIT Find")
-            return None
+        self.logger.error("Database Not INIT Find")
+        return None
 
     def delete_one(self, collection, element):
         """delete One return status of delete"""
         if self.status():
             self.logger.info("Remove collection: %s, data: %s", collection, element)
             return self.db_access[collection].delete_one(element)
-        else:
-            self.logger.error("Database Not INIT Find")
-            return None
+        self.logger.error("Database Not INIT Find")
+        return None
 
     def delete_many(self, collection, element):
         """delete return status of delete"""
         if self.status():
             self.logger.info("Remove collection: %s, data: %s", collection, element)
             return self.db_access[collection].delete_many(element)
-        else:
-            self.logger.error("Database Not INIT Find")
-            return None
+        self.logger.error("Database Not INIT Find")
+        return None
 
     def aggregate(self, collection, element):
         """delete return status of delete"""
         if self.status():
             self.logger.info("Aggregate collection: %s, data: %s", collection, element)
             return self.db_access[collection].aggregate(element)
-        else:
-            self.logger.error("Database Not INIT Find")
-            return None
+        self.logger.error("Database Not INIT Find")
+        return None
 
     def drop(self, collection):
         """Drop a collection return status of drop"""
         if self.status():
             self.logger.info("Drop collection: %s", collection)
             return self.db_access[collection].drop()
-        else:
-            self.logger.error("Database Not INIT Find")
-            return None
+        self.logger.error("Database Not INIT Find")
+        return None
